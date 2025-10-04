@@ -1,0 +1,206 @@
+[reminder_site (3).html](https://github.com/user-attachments/files/22692246/reminder_site.3.html)
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BD Follow-up Reminder CRM</title>
+  <style>
+    body { font-family: Arial, sans-serif; background:#f9fafb; margin:0; padding:20px; }
+    h1 { text-align:center; }
+    .container { max-width:900px; margin:auto; background:#fff; padding:20px; border-radius:12px; box-shadow:0 2px 6px rgba(0,0,0,0.1); }
+    form { display:grid; grid-template-columns:1fr 1fr 1fr 1fr auto; gap:10px; margin-bottom:20px; }
+    input, button { padding:10px; border:1px solid #ddd; border-radius:8px; }
+    button { background:#2563eb; color:white; cursor:pointer; }
+    button:hover { background:#1d4ed8; }
+    .section { margin-top:30px; }
+    .reminder, .history-item { display:flex; justify-content:space-between; align-items:center; padding:10px; border-bottom:1px solid #eee; }
+    .reminder.done { text-decoration: line-through; color:gray; }
+    .reminder.overdue { background:#fee2e2; }
+    .reminder.today { background:#fef3c7; }
+    #exportBtn { background:#16a34a; margin-top:10px; }
+    #searchBar { width:100%; margin-bottom:10px; }
+    #enableAlerts { background:#f59e0b; margin-bottom:20px; width:100%; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Follow-up Reminder CRM</h1>
+    <button id="enableAlerts">Enable Notifications & Sound</button>
+    <form id="reminderForm">
+      <input type="text" id="name" placeholder="Client Name" required>
+      <input type="text" id="company" placeholder="Company Name" required>
+      <input type="text" id="action" placeholder="Next Action (call/email/etc.)" required>
+      <input type="datetime-local" id="datetime" required>
+      <button type="submit">Add</button>
+    </form>
+
+    <div class="section">
+      <h2>Upcoming Reminders</h2>
+      <div id="reminderList"></div>
+    </div>
+
+    <div class="section">
+      <h2>History</h2>
+      <input type="text" id="searchBar" placeholder="Search history by client/action/company...">
+      <div id="historyList"></div>
+      <button id="exportBtn">Export History to CSV</button>
+    </div>
+  </div>
+
+  <audio id="notifySound">
+    <source src="https://actions.google.com/sounds/v1/alarms/beep_short.ogg" type="audio/ogg">
+  </audio>
+
+  <script>
+    const form = document.getElementById('reminderForm');
+    const reminderList = document.getElementById('reminderList');
+    const historyList = document.getElementById('historyList');
+    const notifySound = document.getElementById('notifySound');
+    const exportBtn = document.getElementById('exportBtn');
+    const searchBar = document.getElementById('searchBar');
+    const enableAlerts = document.getElementById('enableAlerts');
+
+    let reminders = JSON.parse(localStorage.getItem('reminders')) || [];
+    let history = JSON.parse(localStorage.getItem('history')) || [];
+    let alertsEnabled = false;
+
+    // Fix: Enable Notifications & Sound Button
+    enableAlerts.addEventListener('click', () => {
+      Notification.requestPermission().then(permission => {
+        if (permission === 'granted') {
+          alertsEnabled = true;
+          notifySound.play(); // test sound
+          alert('Notifications & sound enabled!');
+        } else {
+          alert('Please allow notifications to receive alerts.');
+        }
+      });
+    });
+
+    function saveData() {
+      localStorage.setItem('reminders', JSON.stringify(reminders));
+      localStorage.setItem('history', JSON.stringify(history));
+    }
+
+    function renderReminders() {
+      reminderList.innerHTML = '';
+      const now = new Date();
+      reminders.sort((a,b) => new Date(a.datetime) - new Date(b.datetime));
+      reminders.forEach((reminder, index) => {
+        const div = document.createElement('div');
+        div.className = 'reminder';
+        const reminderTime = new Date(reminder.datetime);
+        if (reminder.done) div.classList.add('done');
+        else if (reminderTime < now) div.classList.add('overdue');
+        else if (reminderTime.toDateString() === now.toDateString()) div.classList.add('today');
+
+        div.innerHTML = `
+          <span>${reminder.name} (${reminder.company}) - ${reminder.action} (Due: ${reminderTime.toLocaleString()})</span>
+          <div>
+            <button onclick="markDone(${index})">Done</button>
+            <button onclick="deleteReminder(${index})" style="background:#dc2626">Delete</button>
+          </div>
+        `;
+        reminderList.appendChild(div);
+      });
+    }
+
+    function renderHistory(filter = '') {
+      historyList.innerHTML = '';
+      let filteredHistory = history;
+      if (filter) {
+        filter = filter.toLowerCase();
+        filteredHistory = history.filter(item =>
+          item.name.toLowerCase().includes(filter) ||
+          item.action.toLowerCase().includes(filter) ||
+          item.company.toLowerCase().includes(filter)
+        );
+      }
+      filteredHistory.sort((a,b) => new Date(b.completedOn) - new Date(a.completedOn));
+      filteredHistory.forEach(item => {
+        const div = document.createElement('div');
+        div.className = 'history-item';
+        div.innerHTML = `
+          <span>${item.name} (${item.company}) - ${item.action} (Scheduled: ${new Date(item.datetime).toLocaleString()}) | Followed Up On: ${new Date(item.completedOn).toLocaleString()}</span>
+        `;
+        historyList.appendChild(div);
+      });
+    }
+
+    form.addEventListener('submit', e => {
+      e.preventDefault();
+      const name = document.getElementById('name').value;
+      const company = document.getElementById('company').value;
+      const action = document.getElementById('action').value;
+      const datetime = document.getElementById('datetime').value;
+      reminders.push({ name, company, action, datetime, done:false, notified:false });
+      saveData();
+      renderReminders();
+      form.reset();
+    });
+
+    function markDone(index) {
+      const completedOn = new Date().toISOString();
+      const doneItem = { ...reminders[index], done:true, completedOn };
+      history.push(doneItem);
+      reminders.splice(index,1);
+      saveData();
+      renderReminders();
+      renderHistory(searchBar.value);
+    }
+
+    function deleteReminder(index) {
+      reminders.splice(index,1);
+      saveData();
+      renderReminders();
+    }
+
+    function checkReminders() {
+      if (!alertsEnabled) return;
+      const now = new Date();
+      reminders.forEach((reminder, index) => {
+        const reminderTime = new Date(reminder.datetime);
+        if (!reminder.done && now >= reminderTime) {
+          if (!reminder.notified || reminder.repeatCounter < 3) {
+            showNotification(reminder);
+            notifySound.play();
+            reminders[index].notified = true;
+            reminders[index].repeatCounter = (reminders[index].repeatCounter || 0) + 1;
+            saveData();
+            renderReminders();
+          }
+        }
+      });
+    }
+
+    function showNotification(reminder) {
+      if (Notification.permission === 'granted') {
+        new Notification("Follow-up Reminder", {
+          body: `${reminder.name} (${reminder.company}): ${reminder.action} (Due now)`,
+          icon: "https://cdn-icons-png.flaticon.com/512/2956/2956744.png"
+        });
+      }
+    }
+
+    function dailySummary() {
+      if (!alertsEnabled) return;
+      const now = new Date();
+      const todayReminders = reminders.filter(r => !r.done && new Date(r.datetime).toDateString() === now.toDateString());
+      const overdueReminders = reminders.filter(r => !r.done && new Date(r.datetime) < now);
+      let summaryText = '';
+      if (todayReminders.length > 0) summaryText += 'Today:\n' + todayReminders.map(r => `${r.name} (${r.company}) - ${r.action}`).join('\n') + '\n\n';
+      if (overdueReminders.length > 0) summaryText += 'Overdue:\n' + overdueReminders.map(r => `${r.name} (${r.company}) - ${r.action}`).join('\n');
+      if (summaryText) {
+        alert('Daily Follow-up Summary:\n\n' + summaryText);
+      }
+    }
+
+    setInterval(checkReminders, 300000); // every 5 min
+    setInterval(dailySummary, 24*60*60*1000); // daily
+
+    renderReminders();
+    renderHistory();
+  </script>
+</body>
+</html>
